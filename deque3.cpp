@@ -5,11 +5,13 @@
 
 #include <cstddef>
 #include <memory>
+#include <cstring>
+#include <cstdlib>
 
 namespace sjtu {
 
     template<class T>
-    class deque : std::deque {
+    class deque {
     private:
         static const int default_cap = 1024;
         T *ring_buffer;
@@ -241,37 +243,9 @@ namespace sjtu {
             bool operator!=(const base_iterator &rhs) const { return !(*this == rhs); }
         };
 
-        typedef base_iterator<T, deque> _iterator;
-        typedef base_iterator<const T, const deque> _const_iterator;
     public:
-        class const_iterator;
-
-        class iterator : public _iterator {
-        protected:
-            friend deque;
-            friend const_iterator;
-
-            iterator(deque *q, const int &pos) : _iterator(q, pos) {}
-
-        public:
-            iterator() : _iterator() {}
-
-            iterator(const _iterator &that) : _iterator(that) {}
-        };
-
-        class const_iterator : public _const_iterator {
-        private:
-            friend deque;
-
-            const_iterator(const deque *q, const int &pos) : _const_iterator(q, pos) {}
-
-        public:
-            const_iterator() : _const_iterator() {}
-
-            const_iterator(const _iterator &that) : _const_iterator(that) {}
-
-            const_iterator(const _const_iterator &that) : _const_iterator(that) {}
-        };
+        typedef base_iterator<T, deque> iterator;
+        typedef base_iterator<const T, const deque> const_iterator;
 
         /**
          * Constructors
@@ -357,7 +331,7 @@ namespace sjtu {
          * returns an iterator pointing to the inserted value
          *     throw if the iterator is invalid or it point to a wrong place.
          */
-        iterator insert(iterator pos, const T &value) {
+        iterator insert(const iterator &pos, const T &value) {
             pos.check_owns(this);
             return iterator(this, insert_before(pos.pos, value));
         }
@@ -368,7 +342,7 @@ namespace sjtu {
          * returns an iterator pointing to the following element, if pos pointing to the last element, end() will be returned.
          * throw if the container is empty, the iterator is invalid or it points to a wrong place.
          */
-        iterator erase(iterator pos) {
+        iterator erase(const iterator &pos) {
             pos.check_owns(this);
             return iterator(this, remove_at(pos.pos));
         }
