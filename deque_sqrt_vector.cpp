@@ -11,6 +11,8 @@ namespace sjtu {
     template<class T>
     class deque {
     private:
+        static const int INSERT_GC_THRESHOLD = 10000;
+        static const int REMOVE_GC_THRESHOLD = 10000;
         template <class U>
         class Vector {
             static const int min_chunk_size = 512;
@@ -224,7 +226,8 @@ namespace sjtu {
             x.erase(chunk + 1);
         }
 
-        bool should_split(int total_size) { return total_size >= 16 && total_size * total_size > _size * 4; }
+        bool should_split(int total_size) { return total_size >= 16 && total_size * total_size > _size * 8; }
+        bool should_merge(int total_size) { return total_size * total_size * 64 <= _size; }
 
         int find_at(int &pos) const {
             int i = 0, _pos = pos, tmp;
@@ -271,20 +274,34 @@ namespace sjtu {
             x[i].insert(pos, value);
             ++_size;
             if (should_split(x[i].size())) split_chunk(i);
-            if (rand() < 10000) gc();
+            if (rand() < INSERT_GC_THRESHOLD) gc();
             return __pos;
         }
 
         void gc() {
             for (int i = 0; i < x.size(); i++) {
-                if (should_split(x[i].size())) split_chunk(i);
+                if (should_split(x[i].size())) {
+                    split_chunk(i);
+                    ++i;
+                }
             }
             for (int i = 0; i < x.size() - 1; i++) {
-                if (should_merge(x[i].size() + x[i + 1].size())) merge_chunk(i);
+                if (should_merge(x[i].size() + x[i + 1].size())) {
+                    merge_chunk(i);
+                    --i;
+                }
             }
         }
 
-        bool should_merge(int total_size) { return total_size * total_size * 8 <= _size; }
+        void clear_zero() {
+            if (x.size() <= 1) return;
+            for (int i = 0; i < x.size() - 1; i++) {
+                if (x[i].size() == 0) {
+                    x.erase(i);
+                    --i;
+                }
+            }
+        }
 
         int remove_at(int pos) {
             throw_if_out_of_bound(pos);
@@ -297,7 +314,7 @@ namespace sjtu {
             } else {
                 if (x.size() > 1 && x[i].size() == 0) x.erase(i);
             }
-            if (rand() < 10000) gc();
+            if (rand() < REMOVE_GC_THRESHOLD) gc();
             return __pos;
         }
 
@@ -417,6 +434,12 @@ namespace sjtu {
          *     throw when the container is empty.
          */
         void pop_front() { remove_at(0); }
+        
+        void debug() const {
+            std::cerr << _size << "(" << x.size() << "): ";
+            for (int i = 0; i < x.size(); i++) std::cerr << x[i].size() << "/" << x[i]._cap << " ";
+            std::cerr << "\n";
+        }
     };
 
 }
