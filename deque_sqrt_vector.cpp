@@ -2,24 +2,27 @@
 #define SJTU_DEQUE_HPP
 
 #include "exceptions.hpp"
+#include "utility.hpp"
 
 #include <cstddef>
 #include <memory>
 #include <vector>
 #include <iostream>
+
 namespace sjtu {
     template<class T>
     class deque {
     private:
         static const int INSERT_GC_THRESHOLD = 10000;
         static const int REMOVE_GC_THRESHOLD = 10000;
-        template <class U>
+
+        template<class U>
         class Vector {
             static const int min_chunk_size = 512;
             friend deque;
+            U *buffer;
             int _size, _cap;
             std::allocator<U> alloc;
-            U *buffer;
 
             bool full() { return _size == _cap; }
 
@@ -40,9 +43,14 @@ namespace sjtu {
             void shrink_if_small() {
                 if (_cap >= (min_chunk_size << 2) && (_size << 2) < _cap) expand_to(_cap >> 2);
             }
+
             void expand_if_full() {
                 if (!full()) return;
                 expand_to(_cap << 1);
+            }
+
+            U *get_buffer() {
+                return buffer;
             }
 
         public:
@@ -55,7 +63,7 @@ namespace sjtu {
                 for (int i = 0; i < that._size; i++) alloc.construct(buffer + i, that[i]);
             }
 
-            Vector& operator=(const Vector& that) {
+            Vector &operator=(const Vector &that) {
                 if (this == &that) return *this;
                 for (int i = 0; i < _size; i++) alloc.destroy(buffer + i);
                 alloc.deallocate(buffer, _cap);
@@ -93,20 +101,75 @@ namespace sjtu {
             }
 
             U &operator[](int pos) { return buffer[pos]; }
+
             const U &operator[](int pos) const { return buffer[pos]; }
         };
 
+        class Cache {
+            static const int cache_size = 512;
+            static const unsigned cache_size_mask = 511;
+            pair<int, void *> cache[cache_size];
+            bool valid[cache_size];
+        public:
+            int hash(const int &idx) { return idx & cache_size_mask; }
+
+            Cache() {
+                expire();
+            }
+
+            Cache(const Cache &that) {
+                expire();
+            }
+
+            Cache &operator=(const Cache &that) {
+                if (this == &that) return *this;
+                expire();
+                return *this;
+            }
+
+            template<typename U>
+            void put(const int &idx, U *entry) {
+                int _idx = hash(idx);
+                valid[_idx] = true;
+                cache[_idx].first = idx;
+                cache[_idx].second = reinterpret_cast<void *>(entry);
+            }
+
+            template<typename U>
+            void put(const int &idx, const U *entry) {
+                int _idx = hash(idx);
+                valid[_idx] = true;
+                cache[_idx].first = idx;
+                cache[_idx].second = const_cast<void *>(reinterpret_cast<const void *>(entry));
+            }
+
+            template<typename U>
+            U *get(const int &idx) {
+                int _idx = hash(idx);
+                if (!valid[_idx]) return nullptr;
+                if (cache[_idx].first != idx) return nullptr;
+                return reinterpret_cast<U *>(cache[_idx].second);
+            }
+
+            void expire() {
+                memset(valid, 0, sizeof(valid));
+            }
+        };
+
+        mutable Cache index_cache;
+
         int _size;
-        Vector < Vector <T> > x;
+        Vector<Vector<T> > x;
     private:
         template<typename Tx, typename Tq>
         class base_iterator {
         protected:
             friend deque;
             Tq *q;
+            mutable Tx *elem;
             int pos;
 
-            base_iterator(Tq *q, const int &pos) : q(q), pos(pos) {}
+            base_iterator(Tq *q, const int &pos) : q(q), pos(pos), elem(NULL) {}
 
             bool owns(Tq *q) const { return q == this->q; }
 
@@ -119,35 +182,41 @@ namespace sjtu {
                 return *self;
             }
 
-            base_iterator &valid() { return valid<base_iterator>(this); }
+            base_iterator &construct() {
+                elem = nullptr;
+                return valid<base_iterator>(this);
+            }
 
-            const base_iterator &valid() const { return valid<const base_iterator>(this); }
+            const base_iterator &construct() const {
+                elem = nullptr;
+                return valid<const base_iterator>(this);
+            }
 
         public:
             base_iterator(const base_iterator &that) = default;
 
-            base_iterator() : base_iterator(NULL, 0) {}
+            base_iterator() : base_iterator(nullptr, 0) {}
 
             /**
              * return a new iterator which pointer n-next elements
              *   even if there are not enough elements, the behaviour is **undefined**.
              * as well as operator-
              */
-            base_iterator operator+(const int &n) const { return base_iterator(q, pos + n).valid(); }
+            base_iterator operator+(const int &n) const { return base_iterator(q, pos + n).construct(); }
 
-            base_iterator operator-(const int &n) const { return base_iterator(q, pos - n).valid(); }
+            base_iterator operator-(const int &n) const { return base_iterator(q, pos - n).construct(); }
 
             // return th distance between two iterator,
             // if these two iterators points to different vectors, throw invaild_iterator.
             int operator-(const base_iterator &rhs) const {
-                valid();
+                construct();
                 check_owns(rhs.q);
                 return pos - rhs.pos;
             }
 
-            base_iterator &operator+=(const int &n) { return *this = base_iterator(q, pos + n).valid(); }
+            base_iterator &operator+=(const int &n) { return *this = base_iterator(q, pos + n).construct(); }
 
-            base_iterator &operator-=(const int &n) { return *this = base_iterator(q, pos - n).valid(); }
+            base_iterator &operator-=(const int &n) { return *this = base_iterator(q, pos - n).construct(); }
 
             base_iterator operator++(int) {
                 auto _ = *this;
@@ -157,7 +226,7 @@ namespace sjtu {
 
             base_iterator &operator++() {
                 ++pos;
-                return valid();
+                return construct();
             }
 
             base_iterator operator--(int) {
@@ -168,15 +237,18 @@ namespace sjtu {
 
             base_iterator &operator--() {
                 --pos;
-                return valid();
+                return construct();
             }
 
             Tx &operator*() const {
-                valid();
-                return q->access(pos);
+                if (!elem) elem = &q->access(pos);
+                return *elem;
             }
 
-            Tx *operator->() const noexcept { return &(q->access(pos)); }
+            Tx *operator->() const noexcept {
+                if (!elem) elem = &q->access(pos);
+                return elem;
+            }
 
             bool operator==(const base_iterator &rhs) const { return rhs.q == q && rhs.pos == pos; }
 
@@ -197,7 +269,12 @@ namespace sjtu {
         template<typename _This, typename Tx>
         static Tx &access(_This *self, int pos) {
             self->throw_if_out_of_bound(pos);
+            Tx *elem = self->index_cache.template get<Tx>(pos);
+            if (elem) return *elem;
+            int _pos = pos;
             int i = self->find_at(pos);
+            elem = &self->x[i][pos];
+            self->index_cache.put(_pos, elem);
             return self->x[i][pos];
         }
 
@@ -227,22 +304,32 @@ namespace sjtu {
         }
 
         bool should_split(int total_size) { return total_size >= 16 && total_size * total_size > _size * 8; }
+
         bool should_merge(int total_size) { return total_size * total_size * 64 <= _size; }
 
         int find_at(int &pos) const {
             int i = 0, _pos = pos, tmp;
             if (_pos <= _size >> 1) {
-                while (_pos >= (tmp = x[i].size())) {
+                while (_pos >= (tmp = x[i]._size)) {
+                    if (tmp == 0) {
+                        ++i;
+                        continue;
+                    }
                     _pos -= tmp;
                     ++i;
                 }
             } else {
-                i = x.size() - 1; _pos = _size - _pos;
-                while (_pos > (tmp = x[i].size())) {
+                i = x._size - 1;
+                _pos = _size - _pos;
+                while (_pos > (tmp = x[i]._size)) {
+                    if (tmp == 0) {
+                        --i;
+                        continue;
+                    }
                     _pos -= tmp;
                     --i;
                 }
-                _pos = x[i].size() - _pos;
+                _pos = x[i]._size - _pos;
             }
             pos = _pos;
             return i;
@@ -256,7 +343,8 @@ namespace sjtu {
                     ++i;
                 }
             } else {
-                i = x.size() - 1; _pos = _size - _pos;
+                i = x.size() - 1;
+                _pos = _size - _pos;
                 while (i != 0 && _pos >= (tmp = x[i].size())) {
                     _pos -= tmp;
                     --i;
@@ -275,10 +363,13 @@ namespace sjtu {
             ++_size;
             if (should_split(x[i].size())) split_chunk(i);
             if (rand() < INSERT_GC_THRESHOLD) gc();
+            index_cache.expire();
             return __pos;
         }
 
+    public:
         void gc() {
+            clear_zero();
             for (int i = 0; i < x.size(); i++) {
                 if (should_split(x[i].size())) {
                     split_chunk(i);
@@ -293,12 +384,13 @@ namespace sjtu {
             }
         }
 
+    private:
+
         void clear_zero() {
             if (x.size() <= 1) return;
             for (int i = 0; i < x.size() - 1; i++) {
                 if (x[i].size() == 0) {
                     x.erase(i);
-                    --i;
                 }
             }
         }
@@ -315,6 +407,7 @@ namespace sjtu {
                 if (x.size() > 1 && x[i].size() == 0) x.erase(i);
             }
             if (rand() < REMOVE_GC_THRESHOLD) gc();
+            index_cache.expire();
             return __pos;
         }
 
@@ -434,7 +527,7 @@ namespace sjtu {
          *     throw when the container is empty.
          */
         void pop_front() { remove_at(0); }
-        
+
         void debug() const {
             std::cerr << _size << "(" << x.size() << "): ";
             for (int i = 0; i < x.size(); i++) std::cerr << x[i].size() << "/" << x[i]._cap << " ";
