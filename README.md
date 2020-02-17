@@ -1,6 +1,6 @@
 # data-structure-deque
 
-A deque of O(sqrt(n)) complexity on access, insert and remove, with an optimization for O(nlogn) access based on fenwick tree.
+A deque of O(sqrt(n)) complexity on access, insert and remove, with an optimization for O(logn) access based on fenwick tree.
 
 You may found the optimized version [here](https://github.com/skyzh/data-structure-deque/blob/master/deque_fenwick_tree_vector.hpp).
 This one is four times faster than [Sqrt Vector](https://github.com/skyzh/data-structure-deque/blob/master/deque_sqrt_vector.cpp)
